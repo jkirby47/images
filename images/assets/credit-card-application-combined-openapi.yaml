@@ -1,0 +1,757 @@
+openapi: 3.0.3
+info:
+  title: Underwriting
+  description: |
+    Operations supporting the submission and retrieval of credit decisions.
+
+    ![Decision Sequence Diagram](https://kirbyfamily.net/stoplight-images/DecisionSequence.png)
+
+  version: 1.0.0
+  contact:
+    name: CaaS Headquarters
+    email: caas@gen6ventures.com
+    url: https://caas.gen6ventures.com
+servers:
+  - url: 'https://caas-sandbox.fnbo.com'
+    description: Sandbox
+tags:
+  - name: Decision
+    description: Obtaining a credit decision for an applicant.
+  - name: Pricing Strategy
+    description: |
+      Package pricing information
+  - name: Prime Rate
+    description: Prime Rate information
+paths:
+  /api/v1/decisions:
+    post:
+      description: |
+        Submit an applicant's information and desired credit card product for processing.
+      summary: Request a Credit Decision
+      operationId: submitCreditApplicationAsync
+      tags:
+        - Decision
+      security:
+      - oauth2ClientCredentials: [ ]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DecisionRequest'
+      callbacks:
+        complete:
+          /api/v1/webhook/decision:
+            $ref: '#/paths/~1api~1v1~1webhook~1decision'
+
+      responses:
+        '202':
+          description: |
+            Decision request has been queued for processing.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  decisionId:
+                    type: string
+                    format: uuid
+                    description: A unique identifier for this decision request.
+                    example: '298eee5c-df21-4bcd-a90b-0b0c7d69c3c9'
+        '400':
+          description: Data validation error in RFC 7807 format.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ValidationErrorResponse'
+
+  /api/v1/decisions/{decisionId}:
+    get:
+      tags:
+        - Decision
+      security:
+        - oauth2ClientCredentials: [ ]
+      summary: Get Decision Results
+      operationId: getCreditCardDecision
+      description: |
+        Get the decision status.
+
+        ![Decision State Diagram](https://kirbyfamily.net/stoplight-images/DecisionStateDiagram.png)
+      parameters:
+        - name: decisionId
+          description: The decision identifier.
+          in: path
+          example: '298eee5c-df21-4bcd-a90b-0b0c7d69c3c9'
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: The processing is complete and the results are returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DecisionResponse'
+        '304':
+          description: The decision was SUBMITTED and is being processed. A new status is not available yet.
+        '404':
+          description: A non-existent decisionId was provided.
+
+  /api/v1/webhook/decision:
+    post:
+      tags:
+        - Decision
+      summary: Decision Notification
+      description: The decision status has changed.
+      operationId: webhookDecisionUpdate
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                decisionId:
+                  type: string
+                  format: uuid
+                  example: '298eee5c-df21-4bcd-a90b-0b0c7d69c3c9'
+              required:
+                - decisionId
+      responses:
+        '200':
+          description: Callback accepted.
+  /api/v1/brands/{platformBrandId}/pricing-strategies:
+    get:
+      tags:
+        - Pricing Strategy
+      summary: Get a Brand's Pricing Strategies
+      description: Get a Brand's list of available pricing strategies.
+      operationId: getBrandPricingStategy
+      security:
+        - oauth2ClientCredentials: [ ]
+      parameters:
+        - name: platformBrandId
+          in: path
+          required: true
+          description: The Platform's Brand identifier.
+          schema:
+            type: string
+          example: 'f67229d2-afc0-4cf3-bb7d-49b97f271627'
+      responses:
+        '200':
+          description: Return a list of available pricing strategies.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - pricing-strategies
+                properties:
+                  pricing-strategies:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        strategyId:
+                          type: string
+                          format: uuid
+                        displayName:
+                          type: string
+                    example:
+                      - strategyId: '9a09b8fe-497e-464e-b473-92849f347636'
+                        displayName: 'Strategy 1'
+                      - strategyId: '1ea16af3-d2a5-43ed-a2b1-36baad9722a8'
+                        displayName: 'Strategy 2'
+                      - strategyId: '3da02e33-bddf-4b3e-a3d8-4d36488b0f75'
+                        displayName: 'Strategy 3'
+
+  /api/v1/pricing-strategies/{strategyId}:
+    get:
+      tags:
+        - Pricing Strategy
+      summary: Get Pricing Details
+      description: Get the pricing strategy details.
+      operationId: getPricingStrategyDetails
+      security:
+        - oauth2ClientCredentials: [ ]
+      parameters:
+        - name: strategyId
+          in: path
+          required: true
+          schema:
+            type: string
+          example: '9a09b8fe-497e-464e-b473-92849f347636'
+      responses:
+        '200':
+          description: Return pricing strategy details.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - tiers
+                  - displayName
+                properties:
+                  displayName:
+                    type: string
+                    example: 'Strategy 1'
+                  tiers:
+                    type: array
+                    items:
+                      type: object
+                      required:
+                        - pricingTier
+                        - margin
+                      properties:
+                        pricingTier:
+                          type: integer
+                        margin:
+                          type: number
+                          format: decimal
+                    example:
+                      - pricingTier: 1
+                        margin: 15.75
+                      - pricingTier: 2
+                        margin: 16.25
+                      - pricingTier: 3
+                        margin: 16.5
+        '404':
+          description: A non-existent strategyId was provided.
+  /api/v1/prime-rate:
+    get:
+      tags:
+        - Prime Rate
+      summary: Get Current Prime Rate
+      description: Get the current prime rate.
+      security:
+        - oauth2ClientCredentials: [ ]
+      operationId: getPrimeRate
+      responses:
+        '200':
+          description: Return the current prime rate and when it became effective.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - primeRate
+                  - effectiveSinceDate
+                properties:
+                  primeRate:
+                    type: number
+                    format: decimal
+                    description: The prime rate usually sourced from the Wall Street Journal.
+                    example: 3.25
+                  effectiveSinceDate:
+                    type: string
+                    format: date
+                    description: The date the prime rate became effective.
+                    example: '2021-06-01'
+components:
+  securitySchemes:
+    oauth2ClientCredentials:
+      type: oauth2
+      flows:
+        clientCredentials:
+          tokenUrl: /api/v1/oauth2/access-token
+          scopes:
+            read: Grant read access
+            write: Update and create access
+  schemas:
+    DecisionRequest:
+      type: object
+      required:
+        - platformBrandId
+        - desiredProductId
+        - platformApplicantId
+        - kycId
+        - firstName
+        - lastName
+        - monthsAtResidence
+        - residenceAddress
+        - residenceType
+        - monthlyResidenceAmount
+        - personalPhoneNumber
+        - personalPhoneType
+        - birthDate
+        - emailAddress
+        - taxId
+        - totalAnnualIncome
+        - primaryIncomeSource
+        - anyNonTaxableIncome
+        - employerName
+        - submittedDateTime
+        - platformApplicationId
+      properties:
+        platformBrandId:
+          type: string
+          example: '06a21063-4e8c-41c5-bd2d-d1e8d0f4aa44'
+          description: |
+            The Platform's ID for the Brand.
+        desiredProductId:
+          type: string
+          format: uuid
+          example: 'e66681e8-9c9f-42d1-ba37-c76d14a29ea9'
+          description: |
+            The product Id that the Applicant wants to apply for.
+        platformApplicantId:
+          type: string
+          example: 'e6b47750-b899-4ee5-9916-96e2b8025211'
+          description: |
+            The Platform's unique, immutable identifier for the Applicant. This could be a Customer Id, Applicant Id, Prospect Id, User, etc.
+        kycId:
+          type: string
+          example: '123445'
+          description: The id used to retrieve KYC data from the KYC provider. This will be an Alloy sourced value.
+        firstName:
+          type: string
+          description: The Applicant's first name.
+          example: Jane
+        middleInitial:
+          type: string
+          description: The Applicant's middle initial.
+          example: A
+        lastName:
+          type: string
+          description: The Applicant's last name.
+          example: Doe
+        monthsAtResidence:
+          type: integer
+          description: The number of months at the residenceAddress.
+          example: 5
+        residenceAddress:
+          $ref: '#/components/schemas/USPhysicalAddress'
+        residenceType:
+          type: string
+          description: |
+            Must be one of:
+
+            |Value|Description|
+            |---|---|
+            |OWN|Applicant owns the residence|
+            |RENT|Applicant rents the residence|
+            |OTHER|Catch All|
+          example: OWN
+        monthlyResidenceAmount:
+          type: number
+          format: decimal
+          description: The monthly rental or mortgage payment on the residence.
+          example: 1234.56
+        personalPhoneNumber:
+          description: |
+            Applicant's personal phone number.
+
+            Must be a US phone number with no formating: AAAPPPSSSS.
+            Where AAA is the area code, PPP is the 3 digit prefix, and SSSS is the 4 digit suffix.
+          type: string
+          example: '4025551212'
+          minLength: 10
+          maxLength: 10
+        personalPhoneType:
+          type: string
+          description: |
+            Must be of one of
+
+            |Value|Description|
+            |---|---|
+            |MOBILE|Mobile phone|
+            |LANDLINE|Traditional landline|
+          example: MOBILE
+        birthDate:
+          type: string
+          format: date
+          description: Applicant's birth date in YYYY-MM-DD format.
+          example: '1990-05-23'
+        emailAddress:
+          type: string
+          description: The Applicant's email address.
+          example: jane_doe@test.us
+        taxId:
+          type: string
+          description: The Applicant's Social Security Number or Tax Id without formatting.
+          example: '123456789'
+        totalAnnualIncome:
+          type: integer
+          description: The Applicant's total annual income.
+          example: 80000
+        primaryIncomeSource:
+          type: string
+          description: |
+            The source of the Applicant's income.
+
+            Must be one of:
+            |Value|Description|
+            |---|---|
+            |EMPLOYED||
+            |UNEMPLOYED||
+            |SELF_EMPLOYED||
+            |OTHER||
+        anyNonTaxableIncome:
+          type: boolean
+          description: Is any portion of the Applicant's income not taxable?
+          example: false
+        submittedDateTime:
+          type: string
+          format: datetime
+          description: The date and time that the applicant submitted the application to the Platform.
+        platformApplicationId:
+          type: string
+          description: A Platform provided application id that is guarenteed to be unique to the Platform.
+          example: '60cfe9e7-a043-4f21-b242-bb058e0fa5d6'
+    DecisionResponse:
+      description: |
+        The `status` property is common for all schemas and will determine which schema should be used to parse the response:
+
+        |Value|Account creation permitted?|Schema|
+        |---|---|---|
+        |APPROVED|Yes|DecisionResponseApproved|
+        |DECLINED|No|DecisionResponseDeclined|
+        |PENDING|Not yet|DecisionResponsePending|
+      oneOf:
+        - $ref: '#/components/schemas/DecisionResponseApproved'
+        - $ref: '#/components/schemas/DecisionResponseDeclined'
+        - $ref: '#/components/schemas/DecisionResponsePending'
+    DecisionResponseCommon:
+      type: object
+      properties:
+        status:
+          type: string
+        decisionDate:
+          type: string
+          format: date
+          description: The date that the decision was rendered.
+          example: '2021-08-12'
+    DecisionBureauDataCommon:
+      type: object
+      properties:
+        scoreFactors:
+          description: Factors used by the bureau to determine the credit score.
+          type: array
+          items:
+            type: string
+          minItems: 1
+          maxItems: 5
+          example:
+            - 'Provide example here'
+        creditScore:
+          description: The applicant's credit score.
+          type: integer
+          example: 690
+        creditScoreDate:
+          description: The date the applicant's credit score became effective.
+          type: string
+          format: date
+          example: '2021-07-15'
+        creditBureau:
+          description: The credit bureau used to obtain the applicant's credit data.
+          type: object
+          required:
+            - name
+            - address
+            - phoneNumber
+          properties:
+            name:
+              type: string
+              description: |
+                The credit bureau's name. Must be one of:
+
+                |Bureau|
+                |---|
+                |EXPERIAN|
+                |EQUIFAX|
+                |TRANSUNION|
+            address:
+              type: object
+              required:
+                - address1
+                - city
+                - state
+                - zip
+              properties:
+                address1:
+                  type: string
+                address2:
+                  type: string
+                city:
+                  type: string
+                state:
+                  type: string
+                zip:
+                  type: string
+            phoneNumber:
+              type: string
+        scoreRange:
+          type: string
+          description: Need description here.
+
+    DecisionResponsePending:
+      description: |
+        DecisionResponsePending schema
+
+        The application is pending manual review. A PENDING status may change after the review. If the status changes, another webhook notification will be sent so the new status can be obtained.
+      allOf:
+        - $ref: '#/components/schemas/DecisionResponseCommon'
+      type: object
+      required:
+        - status
+        - decisionDate
+      properties:
+        status:
+          description: Will be PENDING
+          example: PENDING
+    DecisionResponseDeclinedSection:
+      type: object
+      properties:
+        adverseActionTemplateId:
+          type: string
+          description: |
+            Identifies which adverse action template should be used to render the information to the applicant.
+
+            Will be one of:
+            |Value|Description|
+            |---|---|
+            |Template1|Score denial with 3 reasons (score section)|
+            |Template2|Denial with 1 reason (score section)|
+            |Template3|Denial with 1 reason (no Credit Bureau Report)|
+          example: 'Template1'
+        declineReasons:
+          description: |
+            List of reasons for the decline.
+          type: array
+          items:
+            type: string
+          minItems: 1
+          maxItems: 3
+          example:
+            - 'Too many delinquent accounts'
+            - 'High credit balance'
+
+    DecisionResponseDeclined:
+      description: |
+        DecisionResponseDeclined schema
+
+        The application was declined.
+      allOf:
+        - $ref: '#/components/schemas/DecisionResponseCommon'
+        - $ref: '#/components/schemas/DecisionResponseDeclinedSection'
+        - $ref: '#/components/schemas/DecisionBureauDataCommon'
+      type: object
+      required:
+        - status
+        - templateId
+        - declineReasons
+        - scoreFactors
+        - creditScore
+        - creditScoreDate
+        - creditBureau
+        - scoreRange
+        - decisionDate
+      properties:
+        status:
+          type: string
+          description: Will be DECLINED
+          example: 'DECLINED'
+
+    DeciaionResponseApprovedSection:
+      type: object
+      properties:
+        creditLimit:
+          type: integer
+          description: This is the credit limit in US dollars.
+          example: 5000
+        apr:
+          type: number
+          format: decimal
+          description: The APR approved for the Applicant.
+          example: 16.99
+        primeRate:
+          type: number
+          format: decimal
+          description: The Prime Rate used to calculate the apr.
+          example: 2.5
+        margin:
+          type: number
+          format: decimal
+          description: The number of percentage points added to the prime rate to calculate the apr.
+          example: 14.49
+        decisionDate:
+          type: string
+          format: date
+          description: The date the decision was rendered.
+          example: 2021-06-25
+        cardProductLevel:
+          type: string
+          description: |
+            The benefits tier of the association.
+
+            Will be one of:
+            |Value|
+            |---|
+            |SIGNATURE|
+            |PLATINUM|
+          example: 'SIGNATURE'
+        receivedBestRate:
+          type: boolean
+          description: |
+            **true**, if `apr` is the best rate for the product.
+
+            **false**, if a suboptimal rate was assigned. `scoreFactors`, `creditScore`, `creditScoreDate`,
+            `creditBureau`, and `scoreRange` will be populated and should be displayed to the Applicant.
+
+    DecisionResponseApproved:
+      description: |
+        DecisionResponseApproved schema
+
+        The application was approved.
+      allOf:
+        - $ref: '#/components/schemas/DecisionResponseCommon'
+        - $ref: '#/components/schemas/DeciaionResponseApprovedSection'
+        - $ref: '#/components/schemas/DecisionBureauDataCommon'
+      type: object
+      required:
+        - status
+        - creditLimit
+        - apr
+        - primeRate
+        - margin
+        - decisionDate
+        - cardProductLevel
+        - receivedBestRate
+      properties:
+        status:
+          type: string
+          description: Will be APPROVED
+          example: APPROVED
+
+    ValidationErrorResponse:
+      type: object
+      required:
+        - title
+        - instance
+        - validationErrors
+      properties:
+        title:
+          type: string
+          description: One of 'Data Validation Error'.
+          example: Data Validation Error
+        instance:
+          type: string
+          format: uuid
+          description: An instance id to reference this problem.
+          example: 'urn:uuid:f0a96487-c828-439c-b1ad-5750210d9b56'
+        validationErrors:
+          type: array
+          items:
+            type: object
+            properties:
+              fieldName:
+                type: string
+                description: The name of the request field that failed validation.
+                example: firstName
+              errorCode:
+                type: string
+                description: |
+                  A machine readable code describing the error.
+
+                  Must be one of:
+                  |errorCode|Description|
+                  |---|---|
+                  |30001|Required field missing.|
+                  |30002|minLength or maxLength violation.|
+              errorMessage:
+                type: string
+                description: The reason for the validation error.
+                example: Missing required field.
+            required:
+              - fieldName
+              - errorMessage
+
+    USPhysicalAddress:
+      type: object
+      required:
+        - address1
+        - city
+        - state
+        - zip
+        - countryCode
+      properties:
+        address1:
+          type: string
+        address2:
+          type: string
+        city:
+          type: string
+        state:
+          type: string
+          example: NE
+          description: |
+            Must a valid US state subcode from [ISO 3166-2:US](https://en.wikipedia.org/wiki/ISO_3166-2:US).
+            Does not support US districts, outlying areas, or military bases.
+
+            Must be one of:
+
+            |Value|Description|
+            |---|---|
+            |AL|Alabama|
+            |AK|Alaska|
+            |AZ|Arizona|
+            |AR|Arkansas|
+            |CA|California|
+            |CO|Colorado|
+            |CT|Connecticut|
+            |DE|Delaware|
+            |FL|Florida|
+            |GA|Georgia|
+          #            |HI|Hawaii|
+          #            |ID|Idaho|
+          #            |IL|Illinois|
+          #            |IN|Indiana|
+          #            |IA|Iowa|
+          #            |KS|Kansas|
+          #            |KY|Kentucky|
+          #            |LA|Louisiana|
+          #            |ME|Maine|
+          #            |MD|Maryland|
+          #            |MA|Massachusetts|
+          #            |MI|Michigan|
+          #            |MN|Minnesota|
+          #            |MS|Mississippi|
+          #            |MO|Missouri|
+          #            |MT|Montana|
+          #            |NE|Nebraska|
+          #            |NV|Nevada|
+          #            |NH|New Hampshire|
+          #            |NJ|New Jersey|
+          #            |NM|New Mexico|
+          #            |NY|New York|
+          #            |NC|North Carolina|
+          #            |ND|North Dakota|
+          #            |OH|Ohio|
+          #            |OK|Oklahoma|
+          #            |OR|Oregon|
+          #            |PA|Pennsylvania|
+          #            |RI|Rhode Island|
+          #            |SC|South Carolina|
+          #            |SD|South Dakota|
+          #            |TN|Tennessee|
+          #            |TX|Texas|
+          #            |UT|Utah|
+          #            |VT|Vermont|
+          #            |VA|Virginia|
+          #            |WA|Washington|
+          #            |WV|West Virginia|
+          #            |WI|Wisconsin|
+          #            |WY|Wyoming|
+          minLength: 2
+          maxLength: 2
+        zip:
+          description: The zip code in ZIP or ZIP+4 format.
+          type: string
+          example: 12345-6789
+          minLength: 5
+          maxLength: 10
+        countryCode:
+          description: The Alpha-2 code from ISO 3166 country code standard. Only supports US at this time.
+          type: string
+          example: US
+          minLength: 2
+          maxLength: 2
